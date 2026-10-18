@@ -213,7 +213,7 @@ function createQrMatrix(text = 'ABSENSI') {
     return matrix;
 }
 
-export default function QrCodeSvg({ value, className = 'h-48 w-48' }) {
+export default function QrCodeSvg({ value, className = 'h-48 w-48', id }) {
     const matrix = useMemo(() => createQrMatrix(value || 'ABSENSI'), [value]);
     const size = matrix.length;
     const quietZone = 4;
@@ -221,6 +221,7 @@ export default function QrCodeSvg({ value, className = 'h-48 w-48' }) {
 
     return (
         <svg
+            id={id}
             viewBox={`0 0 ${totalSize} ${totalSize}`}
             className={className}
             shapeRendering="crispEdges"

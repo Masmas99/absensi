@@ -29,7 +29,7 @@ class AttendanceSeeder extends Seeder
         );
 
         $employees = User::query()
-            ->where('role', UserRole::Employee)
+            ->where('role', UserRole::Siswa)
             ->orderBy('id')
             ->get();
 

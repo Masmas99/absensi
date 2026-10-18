@@ -2,10 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\UserRole;
 use App\Models\Attendance;
 use App\Models\AttendanceQrSession;
-use App\Models\Role;
+use App\Models\SchoolSetting;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,24 +28,8 @@ class AttendanceController extends Controller
         }
 
         $today = now()->toDateString();
-
-        $todayQrSession = AttendanceQrSession::query()
-            ->whereDate('date', $today)
-            ->first();
-
-        if (! $todayQrSession) {
-            $superadminId = User::query()
-                ->where('role', UserRole::Superadmin)
-                ->value('id') ?? $user->id;
-
-            $todayQrSession = AttendanceQrSession::query()->create([
-                'date' => $today,
-                'token' => AttendanceQrSession::generateToken($today),
-                'title' => 'Presensi Reguler Kantor Pusat',
-                'is_active' => true,
-                'created_by' => $superadminId,
-            ]);
-        }
+        $todayQrSession = AttendanceQrSession::ensureSingleSession($user->id);
+        $schoolSetting = SchoolSetting::current();
 
         $myTodayAttendance = Attendance::query()
             ->where('user_id', $user->id)
@@ -60,6 +43,13 @@ class AttendanceController extends Controller
                 'date' => $todayQrSession->date?->format('Y-m-d'),
                 'title' => $todayQrSession->title,
                 'is_active' => $todayQrSession->is_active,
+            ],
+            'schoolSetting' => [
+                'school_name' => $schoolSetting->school_name,
+                'latitude' => (float) $schoolSetting->latitude,
+                'longitude' => (float) $schoolSetting->longitude,
+                'radius_meters' => (int) $schoolSetting->radius_meters,
+                'enable_gps_validation' => (bool) $schoolSetting->enable_gps_validation,
             ],
         ]);
     }
@@ -104,7 +94,111 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Generate or refresh today's QR Code session (Superadmin action).
+     * Display the dedicated leave and sick request page (/izin).
+     */
+    public function leave(Request $request): Response|RedirectResponse
+    {
+        $user = $request->user();
+
+        if ($user->isSuperadmin()) {
+            return redirect()
+                ->route('dashboard')
+                ->with('error', 'Superadmin tidak memiliki menu pengajuan izin/cuti.');
+        }
+
+        $today = now()->toDateString();
+
+        $myTodayAttendance = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', $today)
+            ->first();
+
+        $leaveAttendances = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereIn('status', ['leave', 'sick'])
+            ->orderByDesc('date')
+            ->orderByDesc('id')
+            ->limit(30)
+            ->get();
+
+        $monthCounts = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereYear('date', now()->year)
+            ->whereMonth('date', now()->month)
+            ->selectRaw('status, count(*) as total')
+            ->groupBy('status')
+            ->pluck('total', 'status');
+
+        $yearLeaveCount = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereYear('date', now()->year)
+            ->where('status', 'leave')
+            ->count();
+
+        return Inertia::render('Attendance/Leave', [
+            'todayDate' => $today,
+            'myTodayAttendance' => $myTodayAttendance,
+            'leaveAttendances' => $leaveAttendances,
+            'leaveSummary' => [
+                'leave_month' => (int) ($monthCounts['leave'] ?? 0),
+                'sick_month' => (int) ($monthCounts['sick'] ?? 0),
+                'remaining_quota' => max(0, 12 - $yearLeaveCount),
+            ],
+        ]);
+    }
+
+    /**
+     * Store a leave/cuti or sick submission for the authenticated user.
+     */
+    public function storeLeave(Request $request): RedirectResponse
+    {
+        $user = $request->user();
+
+        if ($user->isSuperadmin()) {
+            return back()->with('error', 'Superadmin tidak dapat mengajukan izin/cuti.');
+        }
+
+        $validated = $request->validate([
+            'date' => ['required', 'date'],
+            'status' => ['required', Rule::in(['leave', 'sick'])],
+            'notes' => ['required', 'string', 'max:255'],
+        ]);
+
+        $existing = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', $validated['date'])
+            ->first();
+
+        if ($existing && $existing->check_in) {
+            return back()->with(
+                'error',
+                'Anda sudah tercatat hadir (Check-In) pada tanggal '.$validated['date'].' sehingga tidak dapat mengajukan izin/sakit.',
+            );
+        }
+
+        Attendance::query()->updateOrCreate(
+            [
+                'user_id' => $user->id,
+                'date' => $validated['date'],
+            ],
+            [
+                'check_in' => null,
+                'check_out' => null,
+                'status' => $validated['status'],
+                'notes' => $validated['notes'],
+            ],
+        );
+
+        $label = $validated['status'] === 'sick' ? 'Sakit' : 'Izin / Cuti';
+
+        return back()->with(
+            'success',
+            "Pengajuan {$label} untuk tanggal {$validated['date']} berhasil disimpan.",
+        );
+    }
+
+    /**
+     * Update the single official QR Code session title/status (Superadmin action).
      */
     public function generateQr(Request $request): RedirectResponse
     {
@@ -112,41 +206,23 @@ class AttendanceController extends Controller
             'title' => ['nullable', 'string', 'max:100'],
         ]);
 
-        $today = now()->toDateString();
+        $qrSession = AttendanceQrSession::ensureSingleSession($request->user()->id);
+        $qrSession->update([
+            'token' => AttendanceQrSession::SINGLE_TOKEN,
+            'title' => $validated['title'] ?? 'Presensi QR Code Utama',
+            'is_active' => true,
+            'created_by' => $request->user()->id,
+        ]);
 
-        $qrSession = AttendanceQrSession::query()->updateOrCreate(
-            ['date' => $today],
-            [
-                'token' => AttendanceQrSession::generateToken($today),
-                'title' => $validated['title'] ?? 'Presensi Reguler Kantor Pusat',
-                'is_active' => true,
-                'created_by' => $request->user()->id,
-            ],
-        );
-
-        return back()->with('success', "QR Code baru berhasil dibuat ({$qrSession->token}).");
+        return back()->with('success', "Pengaturan QR Code berhasil diperbarui ({$qrSession->token}).");
     }
 
     /**
-     * Toggle active status of today's QR Code session (Superadmin action).
+     * Toggle active status of the single official QR Code session (Superadmin action).
      */
     public function toggleQr(Request $request): RedirectResponse
     {
-        $today = now()->toDateString();
-
-        $qrSession = AttendanceQrSession::query()->whereDate('date', $today)->first();
-
-        if (! $qrSession) {
-            $qrSession = AttendanceQrSession::query()->create([
-                'date' => $today,
-                'token' => AttendanceQrSession::generateToken($today),
-                'title' => 'Presensi Reguler Kantor Pusat',
-                'is_active' => true,
-                'created_by' => $request->user()->id,
-            ]);
-
-            return back()->with('success', 'Sesi QR Code hari ini telah diaktifkan.');
-        }
+        $qrSession = AttendanceQrSession::ensureSingleSession($request->user()->id);
 
         $qrSession->update([
             'is_active' => ! $qrSession->is_active,
@@ -154,11 +230,29 @@ class AttendanceController extends Controller
 
         $statusText = $qrSession->is_active ? 'diaktifkan' : 'dinonaktifkan';
 
-        return back()->with('success', "Sesi QR Code absensi hari ini berhasil {$statusText}.");
+        return back()->with('success', "Sesi QR Code absensi berhasil {$statusText}.");
     }
 
     /**
-     * Record today's check-in for the authenticated user using Superadmin's QR token.
+     * Calculate distance between two coordinates in meters using the Haversine formula.
+     */
+    private function calculateDistanceMeters(float $lat1, float $lon1, float $lat2, float $lon2): int
+    {
+        $earthRadius = 6371000; // in meters
+        $latDelta = deg2rad($lat2 - $lat1);
+        $lonDelta = deg2rad($lon2 - $lon1);
+
+        $a = sin($latDelta / 2) * sin($latDelta / 2) +
+            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+            sin($lonDelta / 2) * sin($lonDelta / 2);
+
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return (int) round($earthRadius * $c);
+    }
+
+    /**
+     * Record today's check-in for the authenticated user using Superadmin's QR token and GPS coordinates.
      */
     public function checkIn(Request $request): RedirectResponse
     {
@@ -170,6 +264,8 @@ class AttendanceController extends Controller
 
         $validated = $request->validate([
             'qr_token' => ['required', 'string'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'notes' => ['nullable', 'string', 'max:255'],
         ]);
 
@@ -177,9 +273,11 @@ class AttendanceController extends Controller
         $qrSession = AttendanceQrSession::query()
             ->whereDate('date', $today)
             ->where('is_active', true)
-            ->first();
+            ->first() ?? AttendanceQrSession::query()->where('is_active', true)->first();
 
-        if (! $qrSession || strtoupper(trim($validated['qr_token'])) !== strtoupper($qrSession->token)) {
+        $submittedToken = strtoupper(trim($validated['qr_token']));
+
+        if (! $qrSession || $submittedToken !== strtoupper($qrSession->token)) {
             $message = 'Kode QR tidak valid atau sesi absensi belum diaktifkan oleh Superadmin.';
 
             return back()->withErrors(['qr_token' => $message])->with('error', $message);
@@ -194,8 +292,35 @@ class AttendanceController extends Controller
             return back()->with('error', 'Anda sudah melakukan Check-In hari ini pada pukul '.$existing->check_in.'.');
         }
 
+        // Validate GPS location (Wajib sesuai radius GPS)
+        $setting = SchoolSetting::current();
+        $userLat = $request->filled('latitude') ? (float) $request->input('latitude') : null;
+        $userLon = $request->filled('longitude') ? (float) $request->input('longitude') : null;
+
+        if ($userLat === null || $userLon === null) {
+            $errorMsg = 'Presensi ditolak: Koordinat lokasi GPS tidak terdeteksi. Harap aktifkan izin lokasi/GPS pada browser perangkat Anda.';
+
+            return back()->withErrors(['location' => $errorMsg])->with('error', $errorMsg);
+        }
+
+        $distanceMeters = $this->calculateDistanceMeters(
+            $userLat,
+            $userLon,
+            (float) $setting->latitude,
+            (float) $setting->longitude
+        );
+
+        $allowedRadius = (int) ($setting->radius_meters ?: 100);
+
+        if ($distanceMeters > $allowedRadius) {
+            $errorMsg = "Presensi ditolak! Posisi Anda berada di luar radius lokasi yang diizinkan (Jarak Anda: {$distanceMeters} m, Maksimal: {$allowedRadius} m).";
+
+            return back()->withErrors(['location' => $errorMsg])->with('error', $errorMsg);
+        }
+
         $currentTime = now()->format('H:i:s');
-        $status = $currentTime > '08:15:00' ? 'late' : 'present';
+        $gpsInfo = " (GPS: {$distanceMeters}m)";
+        $note = $validated['notes'] ?? "Scan QR - Hadir{$gpsInfo}";
 
         Attendance::query()->updateOrCreate(
             [
@@ -204,16 +329,21 @@ class AttendanceController extends Controller
             ],
             [
                 'check_in' => $currentTime,
-                'status' => $status,
-                'notes' => $validated['notes'] ?? ($status === 'late' ? 'Scan QR - Terlambat' : 'Scan QR - Hadir'),
+                'status' => 'present',
+                'latitude' => $userLat,
+                'longitude' => $userLon,
+                'distance_meters' => $distanceMeters,
+                'notes' => $note,
             ],
         );
 
-        return back()->with('success', 'Scan QR berhasil! Check-In tercatat pada pukul '.$currentTime.' WIB.');
+        $gpsMsg = " Lokasi GPS terverifikasi ({$distanceMeters}m dari titik lokasi).";
+
+        return back()->with('success', "Scan QR berhasil!{$gpsMsg} Check-In tercatat pada pukul {$currentTime} WIB.");
     }
 
     /**
-     * Record today's check-out for the authenticated user using Superadmin's QR token.
+     * Record today's check-out for the authenticated user using Superadmin's QR token and GPS coordinates.
      */
     public function checkOut(Request $request): RedirectResponse
     {
@@ -225,15 +355,19 @@ class AttendanceController extends Controller
 
         $validated = $request->validate([
             'qr_token' => ['required', 'string'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
         ]);
 
         $today = now()->toDateString();
         $qrSession = AttendanceQrSession::query()
             ->whereDate('date', $today)
             ->where('is_active', true)
-            ->first();
+            ->first() ?? AttendanceQrSession::query()->where('is_active', true)->first();
 
-        if (! $qrSession || strtoupper(trim($validated['qr_token'])) !== strtoupper($qrSession->token)) {
+        $submittedToken = strtoupper(trim($validated['qr_token']));
+
+        if (! $qrSession || $submittedToken !== strtoupper($qrSession->token)) {
             $message = 'Kode QR tidak valid atau sesi absensi belum diaktifkan oleh Superadmin.';
 
             return back()->withErrors(['qr_token' => $message])->with('error', $message);
@@ -252,31 +386,97 @@ class AttendanceController extends Controller
             return back()->with('error', 'Anda sudah melakukan Check-Out hari ini pada pukul '.$attendance->check_out.'.');
         }
 
+        $setting = SchoolSetting::current();
+
+        // Validate GPS location (Wajib sesuai radius GPS)
+        $userLat = $request->filled('latitude') ? (float) $request->input('latitude') : null;
+        $userLon = $request->filled('longitude') ? (float) $request->input('longitude') : null;
+
+        if ($userLat === null || $userLon === null) {
+            $errorMsg = 'Presensi ditolak: Koordinat lokasi GPS tidak terdeteksi. Harap aktifkan izin lokasi/GPS pada browser perangkat Anda.';
+
+            return back()->withErrors(['location' => $errorMsg])->with('error', $errorMsg);
+        }
+
+        $distanceMeters = $this->calculateDistanceMeters(
+            $userLat,
+            $userLon,
+            (float) $setting->latitude,
+            (float) $setting->longitude
+        );
+
+        $allowedRadius = (int) ($setting->radius_meters ?: 100);
+
+        if ($distanceMeters > $allowedRadius) {
+            $errorMsg = "Presensi ditolak! Posisi Anda berada di luar radius lokasi yang diizinkan (Jarak Anda: {$distanceMeters} m, Maksimal: {$allowedRadius} m).";
+
+            return back()->withErrors(['location' => $errorMsg])->with('error', $errorMsg);
+        }
+
         $currentTime = now()->format('H:i:s');
+
         $attendance->update([
             'check_out' => $currentTime,
+            'latitude' => $userLat ?? $attendance->latitude,
+            'longitude' => $userLon ?? $attendance->longitude,
+            'distance_meters' => $distanceMeters ?? $attendance->distance_meters,
         ]);
 
-        return back()->with('success', 'Scan QR berhasil! Check-Out tercatat pada pukul '.$currentTime.' WIB.');
+        $gpsMsg = " Lokasi GPS terverifikasi ({$distanceMeters}m dari titik lokasi).";
+
+        return back()->with('success', "Scan QR berhasil!{$gpsMsg} Check-Out tercatat pada pukul {$currentTime} WIB.");
     }
 
     /**
-     * Update a user's role (Superadmin action).
+     * Update an employee's today attendance status (Superadmin action).
      */
-    public function updateUserRole(Request $request, User $user): RedirectResponse
+    public function updateEmployeeAttendance(Request $request, User $user): RedirectResponse
     {
         $validated = $request->validate([
-            'role' => ['required', Rule::enum(UserRole::class)],
+            'status' => ['required', Rule::in(['present', 'late', 'leave', 'sick', 'not_yet'])],
+            'notes' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $roleEnum = UserRole::from($validated['role']);
-        $roleModel = Role::query()->where('slug', $roleEnum->value)->first();
+        $today = now()->toDateString();
 
-        $user->update([
-            'role' => $roleEnum,
-            'role_id' => $roleModel?->id,
-        ]);
+        if ($validated['status'] === 'not_yet') {
+            Attendance::query()
+                ->where('user_id', $user->id)
+                ->whereDate('date', $today)
+                ->delete();
 
-        return back()->with('success', "Role untuk {$user->name} berhasil diperbarui menjadi {$roleEnum->label()}.");
+            return back()->with('success', "Status kehadiran {$user->name} hari ini direset menjadi Belum Absen.");
+        }
+
+        $existing = Attendance::query()
+            ->where('user_id', $user->id)
+            ->whereDate('date', $today)
+            ->first();
+
+        $isPresentOrLate = in_array($validated['status'], ['present', 'late'], true);
+        $defaultCheckIn = $validated['status'] === 'late' ? '08:25:00' : '08:00:00';
+
+        $defaultNotes = match ($validated['status']) {
+            'present' => 'Diverifikasi Hadir oleh Superadmin',
+            'late' => 'Diverifikasi Terlambat oleh Superadmin',
+            'leave' => 'Izin / Cuti (Disetujui Superadmin)',
+            'sick' => 'Sakit (Disetujui Superadmin)',
+            default => '-',
+        };
+
+        Attendance::query()->updateOrCreate(
+            [
+                'user_id' => $user->id,
+                'date' => $today,
+            ],
+            [
+                'check_in' => $isPresentOrLate ? ($existing?->check_in ?? $defaultCheckIn) : null,
+                'check_out' => $isPresentOrLate ? $existing?->check_out : null,
+                'status' => $validated['status'],
+                'notes' => $validated['notes'] ?: $defaultNotes,
+            ],
+        );
+
+        return back()->with('success', "Status kehadiran {$user->name} berhasil diperbarui.");
     }
 }

@@ -15,8 +15,14 @@
         @viteReactRefresh
         @vite(['resources/js/app.jsx', "resources/js/Pages/{$page['component']}.jsx"])
         @inertiaHead
+
+        <!-- PWA Meta & Manifest -->
+        @PwaHead
     </head>
     <body class="font-sans antialiased">
         @inertia
+
+        <!-- PWA Service Worker Registration -->
+        @RegisterServiceWorkerScript
     </body>
 </html>

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['user_id', 'date', 'check_in', 'check_out', 'status', 'notes'])]
+#[Fillable(['user_id', 'date', 'check_in', 'check_out', 'status', 'notes', 'latitude', 'longitude', 'distance_meters'])]
 class Attendance extends Model
 {
     /** @use HasFactory<AttendanceFactory> */
@@ -32,6 +32,9 @@ class Attendance extends Model
     {
         return [
             'date' => 'date:Y-m-d',
+            'latitude' => 'float',
+            'longitude' => 'float',
+            'distance_meters' => 'integer',
         ];
     }
 

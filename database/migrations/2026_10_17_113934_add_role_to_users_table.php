@@ -13,7 +13,7 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->string('role')->default(UserRole::Employee->value)->after('email')->index();
+            $table->string('role')->default(UserRole::Siswa->value)->after('email')->index();
             $table->foreignId('role_id')->nullable()->after('role')->constrained('roles')->nullOnDelete();
         });
     }

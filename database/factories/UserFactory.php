@@ -28,7 +28,7 @@ class UserFactory extends Factory
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
-            'role' => UserRole::Employee,
+            'role' => UserRole::Siswa,
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
             'remember_token' => Str::random(10),
@@ -56,32 +56,20 @@ class UserFactory extends Factory
     }
 
     /**
-     * Indicate that the user has the HR Admin role.
+     * Indicate that the user has the Siswa role.
      */
-    public function hrAdmin(): static
+    public function siswa(): static
     {
         return $this->state(fn (array $attributes) => [
-            'role' => UserRole::HrAdmin,
+            'role' => UserRole::Siswa,
         ]);
     }
 
     /**
-     * Indicate that the user has the Manager role.
-     */
-    public function manager(): static
-    {
-        return $this->state(fn (array $attributes) => [
-            'role' => UserRole::Manager,
-        ]);
-    }
-
-    /**
-     * Indicate that the user has the Employee (Karyawan) role.
+     * Backwards compatibility states.
      */
     public function employee(): static
     {
-        return $this->state(fn (array $attributes) => [
-            'role' => UserRole::Employee,
-        ]);
+        return $this->siswa();
     }
 }

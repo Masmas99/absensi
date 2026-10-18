@@ -5,7 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\UserRole;
 use App\Models\Attendance;
 use App\Models\AttendanceQrSession;
-use App\Models\Role;
+use App\Models\SchoolSetting;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -21,45 +21,17 @@ class DashboardController extends Controller
         $user = $request->user();
         $today = now()->toDateString();
 
-        // Ensure today's QR session exists so Superadmin and employees have an active daily session
-        $todayQrSession = AttendanceQrSession::query()
-            ->whereDate('date', $today)
-            ->first();
-
-        if (! $todayQrSession) {
-            $superadminId = User::query()
-                ->where('role', UserRole::Superadmin)
-                ->value('id') ?? $user->id;
-
-            $todayQrSession = AttendanceQrSession::query()->create([
-                'date' => $today,
-                'token' => AttendanceQrSession::generateToken($today),
-                'title' => 'Presensi Reguler Kantor Pusat',
-                'is_active' => true,
-                'created_by' => $superadminId,
-            ]);
-        }
+        // Ensure single official QR session exists for today
+        $todayQrSession = AttendanceQrSession::ensureSingleSession($user->id);
 
         $roleCounts = User::query()
             ->selectRaw('role, count(*) as total')
             ->groupBy('role')
             ->pluck('total', 'role');
 
-        $roles = collect(UserRole::cases())->map(fn (UserRole $role) => [
-            'slug' => $role->value,
-            'name' => $role->label(),
-            'description' => $role->description(),
-            'users_count' => (int) ($roleCounts[$role->value] ?? 0),
-        ])->values();
+        $schoolSetting = SchoolSetting::current();
 
-        $recentUsers = User::query()
-            ->select(['id', 'name', 'email', 'role', 'created_at'])
-            ->orderBy('name')
-            ->orderBy('id')
-            ->limit(15)
-            ->get();
-
-        // Personal attendance data (only for non-Superadmin users)
+        // Personal attendance data (for regular user / Siswa)
         $myTodayAttendance = null;
         $myAttendanceHistory = collect();
         $myMonthCounts = collect();
@@ -86,48 +58,42 @@ class DashboardController extends Controller
                 ->pluck('total', 'status');
         }
 
-        // Team / Employee attendance monitoring for today
+        // Real-time attendance monitoring for today
         $todayAttendancesByUser = Attendance::query()
             ->whereDate('date', $today)
             ->get()
             ->keyBy('user_id');
 
-        $employees = User::query()
-            ->where('role', UserRole::Employee)
+        $students = User::query()
+            ->where('role', UserRole::Siswa)
             ->orderBy('name')
             ->orderBy('id')
             ->get(['id', 'name', 'email', 'role']);
 
-        $todayTeamAttendances = $employees->map(function (User $employee) use ($todayAttendancesByUser): array {
+        $todayTeamAttendances = $students->map(function (User $student) use ($todayAttendancesByUser): array {
             /** @var Attendance|null $record */
-            $record = $todayAttendancesByUser->get($employee->id);
+            $record = $todayAttendancesByUser->get($student->id);
 
             return [
-                'user_id' => $employee->id,
-                'name' => $employee->name,
-                'email' => $employee->email,
+                'user_id' => $student->id,
+                'name' => $student->name,
+                'email' => $student->email,
                 'check_in' => $record?->check_in,
                 'check_out' => $record?->check_out,
                 'status' => $record ? $record->status : 'not_yet',
                 'status_label' => $record ? $record->statusLabel() : 'Belum Absen',
+                'distance_meters' => $record?->distance_meters,
                 'notes' => $record?->notes ?? '-',
             ];
         })->values();
-
-        $recentAttendances = Attendance::query()
-            ->with('user:id,name,email,role')
-            ->orderByDesc('date')
-            ->orderByDesc('check_in')
-            ->orderByDesc('id')
-            ->limit(8)
-            ->get();
 
         $onTimeToday = $todayAttendancesByUser->where('status', 'present')->count();
         $lateToday = $todayAttendancesByUser->where('status', 'late')->count();
         $leaveToday = $todayAttendancesByUser->whereIn('status', ['leave', 'sick'])->count();
         $presentToday = $onTimeToday + $lateToday;
-        $employeeCount = (int) ($roleCounts[UserRole::Employee->value] ?? 0);
-        $checkedInEmployeeCount = $todayTeamAttendances->where('status', '!=', 'not_yet')->count();
+        $siswaCount = (int) ($roleCounts[UserRole::Siswa->value] ?? 0);
+        $superadminCount = (int) ($roleCounts[UserRole::Superadmin->value] ?? 0);
+        $checkedInCount = $todayTeamAttendances->where('status', '!=', 'not_yet')->count();
 
         return Inertia::render('Dashboard', [
             'todayDate' => $today,
@@ -140,16 +106,17 @@ class DashboardController extends Controller
             ] : null,
             'stats' => [
                 'total_users' => User::query()->count(),
-                'total_roles' => Role::query()->count() ?: count(UserRole::cases()),
-                'superadmin_count' => (int) ($roleCounts[UserRole::Superadmin->value] ?? 0),
-                'hr_admin_count' => (int) ($roleCounts[UserRole::HrAdmin->value] ?? 0),
-                'manager_count' => (int) ($roleCounts[UserRole::Manager->value] ?? 0),
-                'employee_count' => $employeeCount,
+                'superadmin_count' => $superadminCount,
+                'siswa_count' => $siswaCount,
                 'present_today' => $presentToday,
                 'on_time_today' => $onTimeToday,
                 'late_today' => $lateToday,
                 'leave_today' => $leaveToday,
-                'not_checked_in_today' => max(0, $employeeCount - $checkedInEmployeeCount),
+                'sick_today' => $todayAttendancesByUser->where('status', 'sick')->count(),
+                'leave_only_today' => $todayAttendancesByUser->where('status', 'leave')->count(),
+                'not_checked_in_today' => max(0, $siswaCount - $checkedInCount),
+                'enable_gps_validation' => (bool) $schoolSetting->enable_gps_validation,
+                'radius_meters' => (int) $schoolSetting->radius_meters,
             ],
             'myTodayAttendance' => $myTodayAttendance,
             'myAttendanceHistory' => $myAttendanceHistory,
@@ -159,9 +126,19 @@ class DashboardController extends Controller
                 'leave' => (int) (($myMonthCounts['leave'] ?? 0) + ($myMonthCounts['sick'] ?? 0)),
             ],
             'todayTeamAttendances' => $todayTeamAttendances,
-            'recentAttendances' => $recentAttendances,
-            'roles' => $roles,
-            'recentUsers' => $recentUsers,
+            'schoolSetting' => [
+                'id' => $schoolSetting->id,
+                'school_name' => $schoolSetting->school_name,
+                'latitude' => (float) $schoolSetting->latitude,
+                'longitude' => (float) $schoolSetting->longitude,
+                'radius_meters' => (int) $schoolSetting->radius_meters,
+                'check_in_start' => substr((string) $schoolSetting->check_in_start, 0, 5),
+                'check_in_end' => substr((string) $schoolSetting->check_in_end, 0, 5),
+                'late_threshold' => substr((string) $schoolSetting->late_threshold, 0, 5),
+                'check_out_start' => substr((string) $schoolSetting->check_out_start, 0, 5),
+                'check_out_end' => substr((string) $schoolSetting->check_out_end, 0, 5),
+                'enable_gps_validation' => (bool) $schoolSetting->enable_gps_validation,
+            ],
         ]);
     }
 }

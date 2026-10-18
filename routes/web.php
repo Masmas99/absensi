@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AttendanceController;
+use App\Http\Controllers\AttendanceSettingController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
@@ -25,6 +26,10 @@ Route::middleware('auth')->group(function () {
         ->name('attendance.presensi');
     Route::get('/riwayat', [AttendanceController::class, 'history'])
         ->name('attendance.history');
+    Route::get('/izin', [AttendanceController::class, 'leave'])
+        ->name('attendance.leave');
+    Route::post('/izin', [AttendanceController::class, 'storeLeave'])
+        ->name('attendance.leave.store');
 
     Route::post('/attendance/check-in', [AttendanceController::class, 'checkIn'])
         ->name('attendance.check-in');
@@ -36,8 +41,14 @@ Route::middleware('auth')->group(function () {
             ->name('attendance.qr.generate');
         Route::patch('/attendance/qr/toggle', [AttendanceController::class, 'toggleQr'])
             ->name('attendance.qr.toggle');
-        Route::patch('/users/{user}/role', [AttendanceController::class, 'updateUserRole'])
-            ->name('users.update-role');
+        Route::patch('/attendance/employees/{user}', [AttendanceController::class, 'updateEmployeeAttendance'])
+            ->name('attendance.manage.update');
+
+        // Location GPS Attendance Configuration
+        Route::get('/pengaturan-lokasi-gps', [AttendanceSettingController::class, 'edit'])
+            ->name('school.settings.edit');
+        Route::patch('/school/settings', [AttendanceSettingController::class, 'update'])
+            ->name('school.settings.update');
     });
 
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\SchoolSetting;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -38,6 +39,25 @@ class HandleInertiaRequests extends Middleware
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
             ],
+            'schoolSetting' => function () use ($request) {
+                if (! $request->user()) {
+                    return null;
+                }
+
+                try {
+                    $setting = SchoolSetting::current();
+
+                    return $setting ? [
+                        'school_name' => $setting->school_name,
+                        'latitude' => (float) $setting->latitude,
+                        'longitude' => (float) $setting->longitude,
+                        'radius_meters' => (int) $setting->radius_meters,
+                        'enable_gps_validation' => (bool) $setting->enable_gps_validation,
+                    ] : null;
+                } catch (\Throwable) {
+                    return null;
+                }
+            },
         ];
     }
 }

@@ -24,34 +24,24 @@ class DatabaseSeeder extends Seeder
 
         $defaultUsers = [
             [
-                'name' => 'Superadmin Absensi',
+                'name' => 'Super Admin',
                 'email' => 'superadmin@absensi.test',
                 'role' => UserRole::Superadmin,
             ],
             [
-                'name' => 'HR Admin',
-                'email' => 'hr@absensi.test',
-                'role' => UserRole::HrAdmin,
-            ],
-            [
-                'name' => 'Manager Divisi',
-                'email' => 'manager@absensi.test',
-                'role' => UserRole::Manager,
-            ],
-            [
-                'name' => 'Karyawan',
-                'email' => 'karyawan@absensi.test',
-                'role' => UserRole::Employee,
+                'name' => 'Siswa Utama',
+                'email' => 'siswa@absensi.test',
+                'role' => UserRole::Siswa,
             ],
             [
                 'name' => 'Budi Santoso',
-                'email' => 'budi.karyawan@absensi.test',
-                'role' => UserRole::Employee,
+                'email' => 'budi.siswa@absensi.test',
+                'role' => UserRole::Siswa,
             ],
             [
                 'name' => 'Siti Aminah',
-                'email' => 'siti.karyawan@absensi.test',
-                'role' => UserRole::Employee,
+                'email' => 'siti.siswa@absensi.test',
+                'role' => UserRole::Siswa,
             ],
         ];
 

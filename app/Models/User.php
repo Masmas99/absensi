@@ -26,7 +26,7 @@ class User extends Authenticatable
      * @var array<string, mixed>
      */
     protected $attributes = [
-        'role' => UserRole::Employee->value,
+        'role' => UserRole::Siswa->value,
     ];
 
     /**
@@ -102,27 +102,19 @@ class User extends Authenticatable
     }
 
     /**
-     * Determine if the user is an HR Admin.
+     * Determine if the user is a Siswa / regular user.
      */
-    public function isHrAdmin(): bool
+    public function isSiswa(): bool
     {
-        return $this->hasRole(UserRole::HrAdmin);
+        return $this->hasRole(UserRole::Siswa);
     }
 
     /**
-     * Determine if the user is a Manager.
-     */
-    public function isManager(): bool
-    {
-        return $this->hasRole(UserRole::Manager);
-    }
-
-    /**
-     * Determine if the user is an Employee (Karyawan).
+     * Alias for regular user.
      */
     public function isEmployee(): bool
     {
-        return $this->hasRole(UserRole::Employee);
+        return $this->isSiswa();
     }
 
     /**
@@ -134,7 +126,7 @@ class User extends Authenticatable
             return $this->role->label();
         }
 
-        return UserRole::tryFrom((string) $this->role)?->label() ?? 'Karyawan (Employee)';
+        return UserRole::tryFrom((string) $this->role)?->label() ?? 'User / Siswa';
     }
 
     /**

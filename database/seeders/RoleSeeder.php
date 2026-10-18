@@ -13,6 +13,9 @@ class RoleSeeder extends Seeder
      */
     public function run(): void
     {
+        $activeSlugs = UserRole::values();
+        Role::query()->whereNotIn('slug', $activeSlugs)->delete();
+
         foreach (UserRole::cases() as $role) {
             Role::query()->updateOrCreate(
                 ['slug' => $role->value],

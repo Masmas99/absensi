@@ -1,0 +1,16 @@
+{
+    "name": "E-Absensi - Sistem Presensi QR & GPS",
+    "short_name": "E-Absensi",
+    "background_color": "#0f172a",
+    "display": "standalone",
+    "description": "Aplikasi Presensi Kehadiran Online Berbasis QR Code dan Lokasi GPS.",
+    "theme_color": "#0065ff",
+    "start_url": "/",
+    "icons": [
+        {
+            "src": "logo.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

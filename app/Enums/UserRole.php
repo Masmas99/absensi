@@ -5,9 +5,7 @@ namespace App\Enums;
 enum UserRole: string
 {
     case Superadmin = 'superadmin';
-    case HrAdmin = 'hr_admin';
-    case Manager = 'manager';
-    case Employee = 'employee';
+    case Siswa = 'siswa';
 
     /**
      * Get the human-readable label for the role.
@@ -15,10 +13,8 @@ enum UserRole: string
     public function label(): string
     {
         return match ($this) {
-            self::Superadmin => 'Superadmin',
-            self::HrAdmin => 'HR Admin',
-            self::Manager => 'Manager',
-            self::Employee => 'Karyawan (Employee)',
+            self::Superadmin => 'Super Admin',
+            self::Siswa => 'User / Siswa',
         };
     }
 
@@ -28,10 +24,8 @@ enum UserRole: string
     public function description(): string
     {
         return match ($this) {
-            self::Superadmin => 'Akses penuh ke seluruh konfigurasi sistem, pengguna, dan data absensi.',
-            self::HrAdmin => 'Mengelola data karyawan, jadwal kerja, cuti/izin, dan rekapitulasi absensi.',
-            self::Manager => 'Memantau kehadiran tim/divisi dan menyetujui pengajuan izin atau lembur.',
-            self::Employee => 'Melakukan check-in/check-out absensi serta mengajukan izin atau cuti.',
+            self::Superadmin => 'Akses penuh ke konfigurasi sistem, pengaturan GPS presensi, dan penyedia sesi QR Code resmi.',
+            self::Siswa => 'Melakukan presensi masuk dan pulang sekolah / kantor dengan scan QR Code yang divalidasi sesuai lokasi GPS.',
         };
     }
 
