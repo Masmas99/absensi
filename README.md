@@ -85,7 +85,7 @@ Ikuti langkah-langkah berikut untuk menjalankan project ini di komputer lokal An
 
 ### 1. Clone Repository
 ```bash
-git clone https://github.com/your-username/absensi.git
+git clone https://github.com/Masmas99/absensi.git
 cd absensi
 ```
 
